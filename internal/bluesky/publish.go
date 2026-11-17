@@ -99,7 +99,7 @@ func (c *Client) Publish(ctx context.Context, post Post) (uri, cid string, err e
 		createRecordInput{
 			Repo:       c.did,
 			Collection: postCollection,
-			Rkey:       RecordKey(post.FacebookID),
+			Rkey:       c.nextRKey(),
 			Record:     record,
 		},
 		&out,
@@ -107,6 +107,8 @@ func (c *Client) Publish(ctx context.Context, post Post) (uri, cid string, err e
 	if err != nil {
 		return "", "", fmt.Errorf("publish record: %w", err)
 	}
+
+	c.markPublished(post.FacebookID)
 
 	return out.Uri, out.Cid, nil
 }

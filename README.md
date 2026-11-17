@@ -23,9 +23,7 @@ feeds:
 
 A feed is polled immediately on startup and then every `interval`. Items older than `max_age` are skipped, and at most `max_posts_per_run` posts are published per poll. Items are published oldest first.
 
-Duplicate posts are prevented without a database. Every record is created with a record key derived from the RSS item ID (`x-facebook-id`), so a `com.atproto.repo.getRecord` lookup against the PDS is enough to know whether the post already exists. The full source ID is also stored in the record as `x-facebook-id`.
-
-If you delete a post on Bluesky, it may be published again on the next poll. Removing the record removes the deduplication marker.
+Duplicate posts are prevented without a database. On the first poll, the server pages through every `app.bsky.feed.post` record in the repository and builds an in-memory index of the `x-facebook-id` values stored in the records. Each new post is created with a normal TID record key and its source ID stored as `x-facebook-id`. The PDS is the source of truth: the index is rebuilt from it on every start and updated as posts are published. Because the index lives in memory, deleting a post while the server is running does not cause it to be republished until the next restart.
 
 ## Setup & Usage
 

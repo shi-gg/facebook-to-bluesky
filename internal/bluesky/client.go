@@ -2,16 +2,14 @@ package bluesky
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"errors"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
-	"github.com/bluesky-social/indigo/api/atproto"
 	"github.com/bluesky-social/indigo/atproto/atclient"
 	"github.com/bluesky-social/indigo/atproto/identity"
 	"github.com/bluesky-social/indigo/atproto/syntax"
@@ -20,6 +18,7 @@ import (
 const (
 	postCollection = "app.bsky.feed.post"
 	userAgent      = "facebook-to-bluesky (+https://github.com/shi-gg/facebook-to-bluesky)"
+	listPageSize   = 100
 )
 
 type Client struct {
@@ -27,6 +26,11 @@ type Client struct {
 	did  string
 	http *http.Client
 	log  *slog.Logger
+
+	mu          sync.Mutex
+	known       map[string]struct{}
+	indexLoaded bool
+	tid         *syntax.TIDClock
 }
 
 func Login(ctx context.Context, handle, password, pds string, logger *slog.Logger) (*Client, error) {
@@ -53,10 +57,12 @@ func Login(ctx context.Context, handle, password, pds string, logger *slog.Logge
 	}
 
 	return &Client{
-		api:  api,
-		did:  api.AccountDID.String(),
-		http: api.Client,
-		log:  logger,
+		api:   api,
+		did:   api.AccountDID.String(),
+		http:  api.Client,
+		log:   logger,
+		known: make(map[string]struct{}),
+		tid:   syntax.NewTIDClock(0),
 	}, nil
 }
 
@@ -64,25 +70,91 @@ func (c *Client) DID() string {
 	return c.did
 }
 
-func RecordKey(sourceID string) string {
-	sum := sha256.Sum256([]byte(sourceID))
-	return hex.EncodeToString(sum[:])
+func (c *Client) Exists(ctx context.Context, sourceID string) (bool, error) {
+	if err := c.loadIndex(ctx); err != nil {
+		return false, err
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	_, ok := c.known[sourceID]
+	return ok, nil
 }
 
-func (c *Client) Exists(ctx context.Context, sourceID string) (bool, error) {
-	_, err := atproto.RepoGetRecord(ctx, c.api, "", postCollection, c.did, RecordKey(sourceID))
-	if err == nil {
-		return true, nil
+func (c *Client) nextRKey() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.tid.Next().String()
+}
+
+func (c *Client) markPublished(sourceID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.known[sourceID] = struct{}{}
+}
+
+type listRecordsOutput struct {
+	Cursor  *string `json:"cursor,omitempty"`
+	Records []struct {
+		Value json.RawMessage `json:"value"`
+	} `json:"records"`
+}
+
+type indexedRecord struct {
+	XFacebookID string `json:"x-facebook-id"`
+}
+
+func (c *Client) loadIndex(ctx context.Context) error {
+	c.mu.Lock()
+	loaded := c.indexLoaded
+	c.mu.Unlock()
+	if loaded {
+		return nil
 	}
 
-	var apiErr *atclient.APIError
-	if errors.As(err, &apiErr) {
-		if apiErr.StatusCode == http.StatusNotFound || apiErr.Name == "RecordNotFound" {
-			return false, nil
+	known := make(map[string]struct{})
+	cursor := ""
+
+	for {
+		var out listRecordsOutput
+		params := map[string]any{
+			"repo":       c.did,
+			"collection": postCollection,
+			"limit":      int64(listPageSize),
 		}
+		if cursor != "" {
+			params["cursor"] = cursor
+		}
+
+		err := c.api.LexDo(ctx, http.MethodGet, "", "com.atproto.repo.listRecords", params, nil, &out)
+		if err != nil {
+			return fmt.Errorf("list posts: %w", err)
+		}
+
+		for _, record := range out.Records {
+			var value indexedRecord
+			if err := json.Unmarshal(record.Value, &value); err != nil {
+				return fmt.Errorf("decode indexed post: %w", err)
+			}
+			if value.XFacebookID != "" {
+				known[value.XFacebookID] = struct{}{}
+			}
+		}
+
+		if out.Cursor == nil || *out.Cursor == "" || *out.Cursor == cursor {
+			break
+		}
+		cursor = *out.Cursor
 	}
 
-	return false, fmt.Errorf("look up %s: %w", RecordKey(sourceID), err)
+	c.mu.Lock()
+	for id := range known {
+		c.known[id] = struct{}{}
+	}
+	c.indexLoaded = true
+	c.mu.Unlock()
+
+	return nil
 }
 
 func normalizePDS(pds string) string {
