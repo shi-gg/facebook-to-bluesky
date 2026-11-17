@@ -1,0 +1,13 @@
+log_level: info
+port: 8080
+
+feeds:
+    - name: ÖBB
+      url: https://fetchrss.com/feed/1xTEpA2Tj6Es1xTEoH64M9KM.rss
+      interval: 15m
+      max_age: 24h
+      max_posts_per_run: 5
+      include_link: true
+      bluesky:
+          handle: your-handle.bsky.social
+          password: ${BLUESKY_APP_PASSWORD}
