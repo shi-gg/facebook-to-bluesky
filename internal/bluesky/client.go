@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -31,6 +32,13 @@ type Client struct {
 	known       map[string]struct{}
 	indexLoaded bool
 	tid         *syntax.TIDClock
+
+	pdsAud          string
+	videoServiceURL string
+	videoHTTP       *http.Client
+	videoPartHTTP   *http.Client
+	videoPoll       time.Duration
+	videoJobTimeout time.Duration
 }
 
 func Login(ctx context.Context, handle, password, pds string, logger *slog.Logger) (*Client, error) {
@@ -56,13 +64,24 @@ func Login(ctx context.Context, handle, password, pds string, logger *slog.Logge
 		return nil, fmt.Errorf("login: session did not include a DID")
 	}
 
+	pdsAud := ""
+	if parsed, err := url.Parse(api.Host); err == nil && parsed.Hostname() != "" {
+		pdsAud = "did:web:" + parsed.Hostname()
+	}
+
 	return &Client{
-		api:   api,
-		did:   api.AccountDID.String(),
-		http:  api.Client,
-		log:   logger,
-		known: make(map[string]struct{}),
-		tid:   syntax.NewTIDClock(0),
+		api:             api,
+		did:             api.AccountDID.String(),
+		http:            api.Client,
+		log:             logger,
+		known:           make(map[string]struct{}),
+		tid:             syntax.NewTIDClock(0),
+		pdsAud:          pdsAud,
+		videoServiceURL: defaultVideoServiceURL,
+		videoHTTP:       &http.Client{Timeout: 90 * time.Second},
+		videoPartHTTP:   &http.Client{Timeout: 10 * time.Minute},
+		videoPoll:       2 * time.Second,
+		videoJobTimeout: 5 * time.Minute,
 	}, nil
 }
 

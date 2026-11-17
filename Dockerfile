@@ -10,7 +10,7 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/facebook-to-bluesk
 
 FROM alpine:latest
 
-RUN apk add --no-cache ca-certificates tzdata wget \
+RUN apk add --no-cache ca-certificates tzdata wget yt-dlp ffmpeg \
     && addgroup -S app \
     && adduser -S -G app app
 

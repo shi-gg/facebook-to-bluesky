@@ -10,6 +10,7 @@ import (
 	"github.com/shi-gg/facebook-to-bluesky/internal/bluesky"
 	"github.com/shi-gg/facebook-to-bluesky/internal/config"
 	"github.com/shi-gg/facebook-to-bluesky/internal/feed"
+	"github.com/shi-gg/facebook-to-bluesky/internal/video"
 )
 
 type Status struct {
@@ -125,8 +126,8 @@ func (s *Syncer) run(ctx context.Context) {
 			continue
 		}
 
-		text := composeText(post, s.feed.LinkEnabled())
-		if text == "" && len(post.Images) == 0 {
+		text := composeText(post)
+		if text == "" && len(post.Images) == 0 && !s.hasVideo(post) {
 			skipped++
 			continue
 		}
@@ -136,12 +137,7 @@ func (s *Syncer) run(ctx context.Context) {
 			createdAt = time.Now()
 		}
 
-		uri, _, err := client.Publish(ctx, bluesky.Post{
-			Text:       text,
-			Images:     post.Images,
-			CreatedAt:  createdAt,
-			FacebookID: post.ID,
-		})
+		uri, err := s.publish(ctx, client, post, text, createdAt)
 		if err != nil {
 			hadError = true
 			s.fail(err)
@@ -196,6 +192,41 @@ func (s *Syncer) tooOld(post feed.Post) bool {
 		return false
 	}
 	return time.Since(post.Published) > maxAge
+}
+
+func (s *Syncer) hasVideo(post feed.Post) bool {
+	return s.feed.VideosEnabled() && post.Video != ""
+}
+
+func (s *Syncer) publish(ctx context.Context, client *bluesky.Client, post feed.Post, text string, createdAt time.Time) (string, error) {
+	var clip *bluesky.Video
+
+	if s.hasVideo(post) {
+		downloaded, err := video.Download(ctx, post.Video)
+		if err != nil {
+			s.log.Warn("skipping video", "url", post.Video, "error", err)
+		} else {
+			defer downloaded.Cleanup()
+			clip = &bluesky.Video{
+				Path:     downloaded.Path,
+				Size:     downloaded.Size,
+				Width:    downloaded.Width,
+				Height:   downloaded.Height,
+				Duration: downloaded.Duration,
+				MimeType: downloaded.MimeType,
+			}
+		}
+	}
+
+	uri, _, err := client.Publish(ctx, bluesky.Post{
+		Text:       text,
+		Images:     post.Images,
+		Video:      clip,
+		CreatedAt:  createdAt,
+		FacebookID: post.ID,
+	})
+
+	return uri, err
 }
 
 func (s *Syncer) fail(err error) {

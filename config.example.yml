@@ -7,7 +7,7 @@ feeds:
       interval: 15m
       max_age: 24h
       max_posts_per_run: 5
-      include_link: true
+      include_videos: true
       bluesky:
           handle: your-handle.bsky.social
           password: ${BLUESKY_APP_PASSWORD}

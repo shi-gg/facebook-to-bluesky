@@ -16,6 +16,7 @@ import (
 
 	"github.com/bluesky-social/indigo/api/atproto"
 	"github.com/bluesky-social/indigo/api/bsky"
+	"github.com/bluesky-social/indigo/lex/util"
 	_ "golang.org/x/image/webp"
 )
 
@@ -24,6 +25,7 @@ const maxImageBytes = 2_000_000
 type Post struct {
 	Text       string
 	Images     []string
+	Video      *Video
 	CreatedAt  time.Time
 	FacebookID string
 }
@@ -67,7 +69,7 @@ func (c *Client) Publish(ctx context.Context, post Post) (uri, cid string, err e
 	if len(post.Images) > 4 {
 		return "", "", fmt.Errorf("maximum 4 images allowed")
 	}
-	if strings.TrimSpace(post.Text) == "" && len(post.Images) == 0 {
+	if strings.TrimSpace(post.Text) == "" && len(post.Images) == 0 && post.Video == nil {
 		return "", "", fmt.Errorf("post cannot be empty")
 	}
 	if strings.TrimSpace(post.FacebookID) == "" {
@@ -79,8 +81,29 @@ func (c *Client) Publish(ctx context.Context, post Post) (uri, cid string, err e
 
 	record := buildRecord(post)
 
-	images := c.uploadImages(ctx, post.Images)
-	if len(images) > 0 {
+	var videoBlob *util.LexBlob
+	if post.Video != nil {
+		blob, err := c.uploadVideo(ctx, post.Video)
+		if err != nil {
+			c.log.Warn("skipping video", "error", err)
+		} else {
+			videoBlob = blob
+		}
+	}
+
+	if videoBlob != nil {
+		video := &bsky.EmbedVideo{
+			LexiconTypeID: "app.bsky.embed.video",
+			Video:         videoBlob,
+		}
+		if post.Video.Width > 0 && post.Video.Height > 0 {
+			video.AspectRatio = &bsky.EmbedDefs_AspectRatio{
+				Width:  post.Video.Width,
+				Height: post.Video.Height,
+			}
+		}
+		record.Embed = &bsky.FeedPost_Embed{EmbedVideo: video}
+	} else if images := c.uploadImages(ctx, post.Images); len(images) > 0 {
 		record.Embed = &bsky.FeedPost_Embed{
 			EmbedImages: &bsky.EmbedImages{
 				LexiconTypeID: "app.bsky.embed.images",

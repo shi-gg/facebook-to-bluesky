@@ -56,6 +56,7 @@ type Feed struct {
 	MaxAge         Duration `yaml:"max_age"`
 	MaxPostsPerRun int      `yaml:"max_posts_per_run"`
 	IncludeLink    *bool    `yaml:"include_link"`
+	IncludeVideos  *bool    `yaml:"include_videos"`
 	Bluesky        Bluesky  `yaml:"bluesky"`
 }
 
@@ -65,8 +66,8 @@ type Bluesky struct {
 	PDS      string `yaml:"pds"`
 }
 
-func (f Feed) LinkEnabled() bool {
-	return f.IncludeLink == nil || *f.IncludeLink
+func (f Feed) VideosEnabled() bool {
+	return f.IncludeVideos == nil || *f.IncludeVideos
 }
 
 func Load(path string) (*Config, error) {

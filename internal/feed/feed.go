@@ -28,6 +28,7 @@ type Post struct {
 	Title     string
 	Text      string
 	Images    []string
+	Video     string
 	Published time.Time
 }
 
@@ -79,9 +80,9 @@ func (f *Fetcher) Fetch(ctx context.Context, feedURL string) ([]Post, error) {
 }
 
 func convert(item *gofeed.Item, feedURL string) Post {
-	text, htmlImages := cleanHTML(item.Description)
+	text, htmlImages, htmlVideos := cleanHTML(item.Description)
 	if text == "" {
-		text, _ = cleanHTML(item.Title)
+		text, _, _ = cleanHTML(item.Title)
 	}
 
 	published := time.Time{}
@@ -95,6 +96,7 @@ func convert(item *gofeed.Item, feedURL string) Post {
 		Title:     strings.TrimSpace(item.Title),
 		Text:      text,
 		Images:    collectImages(item, htmlImages),
+		Video:     collectVideo(item, htmlVideos),
 		Published: published,
 	}
 }
@@ -150,12 +152,41 @@ func collectImages(item *gofeed.Item, htmlImages []string) []string {
 	return images
 }
 
+func collectVideo(item *gofeed.Item, htmlVideos []string) string {
+	base, _ := url.Parse(item.Link)
+
+	candidates := make([]string, 0, 4+len(htmlVideos))
+	candidates = append(candidates, htmlVideos...)
+	for _, enclosure := range item.Enclosures {
+		if enclosure == nil {
+			continue
+		}
+		if strings.HasPrefix(enclosure.Type, "video/") {
+			candidates = append(candidates, enclosure.URL)
+		}
+	}
+	candidates = append(candidates, mediaVideos(item)...)
+	candidates = append(candidates, item.Link)
+
+	for _, raw := range candidates {
+		videoURL := normalizeURL(base, raw)
+		if videoURL != "" && isVideoURL(videoURL) {
+			return videoURL
+		}
+	}
+
+	return ""
+}
+
 func mediaImages(item *gofeed.Item) []string {
 	var images []string
 
 	appendExtension := func(extension map[string][]ext.Extension) {
 		for _, name := range []string{"content", "thumbnail"} {
 			for _, item := range extension[name] {
+				if item.Attrs["type"] != "" && !strings.HasPrefix(item.Attrs["type"], "image/") {
+					continue
+				}
 				if raw := item.Attrs["url"]; raw != "" {
 					images = append(images, raw)
 				}
@@ -169,6 +200,53 @@ func mediaImages(item *gofeed.Item) []string {
 	}
 
 	return images
+}
+
+func mediaVideos(item *gofeed.Item) []string {
+	var videos []string
+
+	appendExtension := func(extension map[string][]ext.Extension) {
+		for _, item := range extension["content"] {
+			if !strings.HasPrefix(item.Attrs["type"], "video/") {
+				continue
+			}
+			if raw := item.Attrs["url"]; raw != "" {
+				videos = append(videos, raw)
+			}
+		}
+	}
+
+	appendExtension(item.Extensions["media"])
+	for _, group := range item.Extensions["media"]["group"] {
+		appendExtension(group.Children)
+	}
+
+	return videos
+}
+
+func isVideoURL(raw string) bool {
+	parsed, err := url.Parse(raw)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return false
+	}
+
+	host := strings.ToLower(parsed.Hostname())
+	path := strings.ToLower(parsed.Path)
+
+	switch {
+	case host == "facebook.com", strings.HasSuffix(host, ".facebook.com"),
+		host == "fb.watch", strings.HasSuffix(host, ".fb.watch"):
+		for _, marker := range []string{"/reel/", "/reels/", "/videos/", "/share/v/"} {
+			if strings.Contains(path, marker) {
+				return true
+			}
+		}
+		return strings.HasPrefix(path, "/watch") || strings.HasPrefix(path, "/video.php")
+	case strings.HasSuffix(host, ".fbcdn.net"):
+		return strings.HasSuffix(path, ".mp4") || strings.HasSuffix(path, ".m4v")
+	default:
+		return strings.HasSuffix(path, ".mp4") || strings.HasSuffix(path, ".mov") || strings.HasSuffix(path, ".m4v")
+	}
 }
 
 func normalizeURL(base *url.URL, raw string) string {

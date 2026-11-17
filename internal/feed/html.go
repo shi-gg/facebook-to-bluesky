@@ -2,6 +2,7 @@ package feed
 
 import (
 	"html"
+	"net/url"
 	"regexp"
 	"strings"
 
@@ -13,26 +14,44 @@ var (
 	manyNewlines    = regexp.MustCompile(`\n{3,}`)
 )
 
-func cleanHTML(raw string) (string, []string) {
+func cleanHTML(raw string) (string, []string, []string) {
 	if strings.TrimSpace(raw) == "" {
-		return "", nil
+		return "", nil, nil
 	}
 
 	doc, err := xhtml.Parse(strings.NewReader(raw))
 	if err != nil {
-		return normalizeText(html.UnescapeString(raw)), nil
+		return normalizeText(html.UnescapeString(raw)), nil, nil
 	}
 
 	var (
 		text   strings.Builder
 		images []string
+		videos []string
 	)
 
 	var walk func(*xhtml.Node)
 	walk = func(node *xhtml.Node) {
 		if node.Type == xhtml.ElementNode {
 			switch node.Data {
-			case "script", "style", "noscript", "iframe", "svg", "video", "audio":
+			case "script", "style", "noscript", "svg", "audio":
+				return
+			case "iframe":
+				if src := attr(node, "src"); src != "" {
+					if video := videoFromEmbed(src); video != "" {
+						videos = append(videos, video)
+					}
+				}
+				return
+			case "video":
+				if src := attr(node, "src"); src != "" {
+					videos = append(videos, src)
+					return
+				}
+			case "source":
+				if src := attr(node, "src"); src != "" {
+					videos = append(videos, src)
+				}
 				return
 			case "img":
 				if src := attr(node, "src"); src != "" {
@@ -64,7 +83,23 @@ func cleanHTML(raw string) (string, []string) {
 
 	walk(doc)
 
-	return normalizeText(text.String()), images
+	return normalizeText(text.String()), images, videos
+}
+
+func videoFromEmbed(raw string) string {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return ""
+	}
+
+	host := strings.ToLower(parsed.Hostname())
+	if host == "facebook.com" || strings.HasSuffix(host, ".facebook.com") {
+		if strings.EqualFold(parsed.Path, "/plugins/video.php") {
+			return parsed.Query().Get("href")
+		}
+	}
+
+	return raw
 }
 
 func attr(node *xhtml.Node, name string) string {

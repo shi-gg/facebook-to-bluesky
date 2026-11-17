@@ -7,6 +7,7 @@ Facebook to Bluesky mirrors Facebook pages to Bluesky using [FetchRSS](https://f
 **You can use the following features**
 - Multiple feeds, each with its own Bluesky account and polling interval
 - Plain text, links, hashtags and up to four images per post
+- Facebook reels and videos, downloaded with `yt-dlp` and uploaded to Bluesky
 - No database or Redis: the PDS is the source of truth
 - Health and status endpoints for container monitoring
 - Environment variable expansion for secrets
@@ -94,7 +95,7 @@ feeds:
       interval: 15m
       max_age: 24h
       max_posts_per_run: 5
-      include_link: true
+      include_videos: true
       bluesky:
           handle: your-handle.bsky.social
           password: ${BLUESKY_APP_PASSWORD}
@@ -119,7 +120,8 @@ feeds:
 | `feeds[].interval` | duration | `15m` | How often the feed is polled |
 | `feeds[].max_age` | duration | `24h` | Items older than this are skipped; a negative value disables the limit |
 | `feeds[].max_posts_per_run` | int | `5` | Maximum posts published per poll; a negative value disables the limit |
-| `feeds[].include_link` | bool | `true` | Append the original post URL to the Bluesky post |
+| `feeds[].include_link` | bool | — | Ignored; kept so existing configurations still load |
+| `feeds[].include_videos` | bool | `true` | Download and publish videos and reels |
 | `feeds[].bluesky.handle` | string | — | Handle or DID of the target account |
 | `feeds[].bluesky.password` | string | — | App password for the target account |
 | `feeds[].bluesky.pds` | string | resolved | PDS host override, for example `https://bsky.social` |
@@ -149,6 +151,8 @@ go test ./...
 docker build -t facebook-to-bluesky .
 ```
 
-Images are downloaded fresh on every publish. FetchRSS image URLs from Facebook expire after a while, so old feed items whose images are no longer reachable are published as text-only. Images that fail to download, exceed 2 MB or use an unsupported format are skipped individually. Video posts are published as text with the video thumbnail and a link to the original post.
+Images are downloaded fresh on every publish. FetchRSS image URLs from Facebook expire after a while, so old feed items whose images are no longer reachable are published as text-only. Images that fail to download, exceed 2 MB or use an unsupported format are skipped individually.
 
-Bluesky limits posts to 300 graphemes. Longer Facebook posts are truncated with an ellipsis, while room is reserved for the source link.
+Videos are resolved from the Facebook reel or video URL in the feed item. The Docker image ships `yt-dlp` and `ffmpeg` for this. If a video cannot be downloaded, converted or uploaded, the post is published with its text and images instead. Binary deployments need `yt-dlp` and `ffmpeg` on `PATH` for video support; without them, feeds are published as text and images only.
+
+Bluesky limits posts to 300 graphemes. Longer Facebook posts are truncated with an ellipsis.

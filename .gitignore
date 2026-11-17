@@ -2,3 +2,4 @@ facebook-to-bluesky
 config.yml
 .env
 *.log
+*_test.go

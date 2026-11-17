@@ -10,28 +10,13 @@ import (
 
 const maxPostGraphemes = 300
 
-func composeText(post feed.Post, includeLink bool) string {
+func composeText(post feed.Post) string {
 	text := strings.TrimSpace(strings.ToValidUTF8(post.Text, ""))
 	if text == "" {
 		text = strings.TrimSpace(strings.ToValidUTF8(post.Title, ""))
 	}
 
-	var suffix string
-	if link := strings.TrimSpace(post.URL); includeLink && link != "" && !strings.Contains(text, link) {
-		suffix = "\n\n" + link
-	}
-
-	available := maxPostGraphemes - uniseg.GraphemeClusterCount(suffix)
-	if available < 20 {
-		return truncateGraphemes(text, maxPostGraphemes)
-	}
-
-	body := truncateGraphemes(text, available)
-	if body == "" {
-		return strings.TrimSpace(suffix)
-	}
-
-	return body + suffix
+	return truncateGraphemes(text, maxPostGraphemes)
 }
 
 func truncateGraphemes(text string, max int) string {
